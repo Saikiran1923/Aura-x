@@ -1,5 +1,6 @@
 import asyncio
 import json
+import os
 import re
 from typing import Any
 
@@ -9,11 +10,13 @@ MODEL_NAME = "qwen2.5:7b"
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
 REQUEST_TIMEOUT_SECONDS = 60
 KEEP_ALIVE = "30m"
+CPU_THREADS = max(1, (os.cpu_count() or 4) - 1)
 DEFAULT_OLLAMA_OPTIONS = {
     "temperature": 0.1,
     "top_p": 0.8,
     "num_ctx": 2048,
     "num_predict": 400,
+    "num_thread": CPU_THREADS,
 }
 
 
