@@ -23,6 +23,7 @@ class AuraXSystem:
             plan = await self.planner.create_plan(user_request)
         except Exception as exc:
             print(f"Planning failed: {exc}")
+            print("Hint: ensure Ollama is running (ollama serve) and model is available (ollama pull qwen2.5:7b).")
             return 1
 
         project_name = self._sanitize_project_name(plan["project_name"])
