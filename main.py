@@ -7,6 +7,7 @@ from agents.coder import CoderAgent
 from agents.debugger import DebuggerAgent
 from agents.planner import PlannerAgent
 from core.executor import ExecutionEngine, ExecutionResult
+from core.launcher import ProjectLauncher
 
 
 class AuraXSystem:
@@ -15,12 +16,14 @@ class AuraXSystem:
         self.coder = CoderAgent()
         self.debugger = DebuggerAgent()
         self.executor = ExecutionEngine()
+        self.launcher = ProjectLauncher()
 
     async def run(self, user_request: str) -> int:
         try:
             plan = await self.planner.create_plan(user_request)
         except Exception as exc:
             print(f"Planning failed: {exc}")
+            print("Hint: ensure Ollama is running (ollama serve) and model is available (ollama pull qwen2.5:7b).")
             return 1
 
         project_name = self._sanitize_project_name(plan["project_name"])
@@ -31,6 +34,7 @@ class AuraXSystem:
 
         project_root = Path("projects") / project_name
         await asyncio.to_thread(project_root.mkdir, parents=True, exist_ok=True)
+        critical_errors: list[str] = []
 
         for task in plan["tasks"]:
             description = task["description"]
@@ -43,7 +47,9 @@ class AuraXSystem:
                         project_request=None,
                     )
                 except Exception as exc:
-                    print(f"Code generation failed for {file_name}: {exc}")
+                    error_message = f"Code generation failed for {file_name}: {exc}"
+                    print(error_message)
+                    critical_errors.append(error_message)
                     continue
 
                 try:
@@ -54,7 +60,9 @@ class AuraXSystem:
                     )
                     print(f"Created: {written_path}")
                 except Exception as exc:
-                    print(f"Write failed for {file_name}: {exc}")
+                    error_message = f"Write failed for {file_name}: {exc}"
+                    print(error_message)
+                    critical_errors.append(error_message)
                     continue
 
                 if written_path.suffix.lower() != ".py":
@@ -65,14 +73,29 @@ class AuraXSystem:
                     continue
 
                 print("Error detected. Attempting automatic correction (1 attempt).")
-                await self._attempt_fix_once(
+                fix_successful = await self._attempt_fix_once(
                     project_name=project_name,
                     file_name=file_name,
                     first_result=result,
                 )
+                if not fix_successful:
+                    critical_errors.append(f"Execution failed for {file_name} after auto-correction.")
 
         print("\nProject generation flow completed.")
         print(f"Output directory: {project_root.resolve()}")
+        if critical_errors:
+            print("Critical errors detected. Application launch skipped.")
+            for error in critical_errors:
+                print(f"- {error}")
+            return 1
+
+        print("Project created successfully.")
+        print("Launching application...")
+        launch_result = await asyncio.to_thread(self.launcher.launch_project, project_root)
+        if launch_result.browser_open_scheduled:
+            print("Opening in browser...")
+        elif launch_result.details:
+            print(f"Launch note: {launch_result.details}")
         return 0
 
     async def _execute_file(self, project_name: str, file_name: str) -> ExecutionResult:
@@ -96,13 +119,13 @@ class AuraXSystem:
         project_name: str,
         file_name: str,
         first_result: ExecutionResult,
-    ) -> None:
+    ) -> bool:
         target_path = (Path("projects") / project_name / file_name).resolve()
         try:
             original_code = await asyncio.to_thread(target_path.read_text, "utf-8")
         except Exception as exc:
             print(f"Cannot read file for debugging ({file_name}): {exc}")
-            return
+            return False
 
         try:
             fixed_code = await self.debugger.fix_code(
@@ -112,7 +135,7 @@ class AuraXSystem:
             )
         except Exception as exc:
             print(f"Debugger failed for {file_name}: {exc}")
-            return
+            return False
 
         try:
             await self.coder.write_file(
@@ -122,14 +145,16 @@ class AuraXSystem:
             )
         except Exception as exc:
             print(f"Failed to write corrected code for {file_name}: {exc}")
-            return
+            return False
 
         print("Re-running file after auto-correction...")
         second_result = await self._execute_file(project_name, file_name)
         if second_result.has_error:
             print("Automatic correction failed.")
+            return False
         else:
             print("Automatic correction successful.")
+            return True
 
     def _sanitize_project_name(self, project_name: str) -> str:
         cleaned = re.sub(r"[^A-Za-z0-9_-]+", "_", project_name.strip())

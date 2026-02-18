@@ -22,7 +22,8 @@ aura-x/
 │   ├── coder.py
 │   └── debugger.py
 ├── core/
-│   └── executor.py
+│   ├── executor.py
+│   └── launcher.py
 ├── projects/
 ├── main.py
 ├── requirements.txt
@@ -49,6 +50,17 @@ aura-x/
 - `python main.py`
 
 Then enter your project request when prompted.
+
+## Timeout Tuning (Slow Local Machines)
+
+If you see `Read timed out` from Ollama, increase the read timeout using environment variables.
+
+- PowerShell:
+  - `$env:AURAX_OLLAMA_TIMEOUT_SECONDS="300"`
+  - `$env:AURAX_OLLAMA_MAX_RETRIES="3"`
+- CMD:
+  - `set AURAX_OLLAMA_TIMEOUT_SECONDS=300`
+  - `set AURAX_OLLAMA_MAX_RETRIES=3`
 
 ## Runtime Behavior
 
