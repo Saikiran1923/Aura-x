@@ -5,7 +5,14 @@ import requests
 
 MODEL_NAME = "qwen2.5:7b"
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
-REQUEST_TIMEOUT_SECONDS = 180
+REQUEST_TIMEOUT_SECONDS = 90
+KEEP_ALIVE = "30m"
+DEFAULT_OLLAMA_OPTIONS = {
+    "temperature": 0.1,
+    "top_p": 0.85,
+    "num_ctx": 3072,
+    "num_predict": 1000,
+}
 
 
 class DebuggerAgent:
@@ -14,10 +21,15 @@ class DebuggerAgent:
         model_name: str = MODEL_NAME,
         ollama_api_url: str = OLLAMA_API_URL,
         timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
+        keep_alive: str = KEEP_ALIVE,
+        ollama_options: dict[str, Any] | None = None,
     ) -> None:
         self.model_name = model_name
         self.ollama_api_url = ollama_api_url
         self.timeout_seconds = timeout_seconds
+        self.keep_alive = keep_alive
+        self.ollama_options = ollama_options or DEFAULT_OLLAMA_OPTIONS.copy()
+        self.session = requests.Session()
 
     async def fix_code(
         self,
@@ -61,12 +73,14 @@ class DebuggerAgent:
             "model": self.model_name,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": self.keep_alive,
+            "options": self.ollama_options,
         }
         return await asyncio.to_thread(self._post_to_ollama, payload)
 
     def _post_to_ollama(self, payload: dict[str, Any]) -> str:
         try:
-            response = requests.post(
+            response = self.session.post(
                 self.ollama_api_url,
                 json=payload,
                 timeout=self.timeout_seconds,

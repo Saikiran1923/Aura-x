@@ -4,7 +4,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 PROJECTS_ROOT = Path("projects")
-DEFAULT_EXECUTION_TIMEOUT_SECONDS = 45
+DEFAULT_EXECUTION_TIMEOUT_SECONDS = 15
 
 
 @dataclass
@@ -17,7 +17,7 @@ class ExecutionResult:
 
     @property
     def has_error(self) -> bool:
-        return self.timed_out or self.return_code != 0 or bool(self.stderr.strip())
+        return self.timed_out or self.return_code != 0
 
 
 class ExecutionEngine:
@@ -41,6 +41,7 @@ class ExecutionEngine:
             self.python_executable,
             str(file_path),
             cwd=str(file_path.parent),
+            stdin=asyncio.subprocess.DEVNULL,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

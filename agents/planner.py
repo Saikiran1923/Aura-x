@@ -7,7 +7,14 @@ import requests
 
 MODEL_NAME = "qwen2.5:7b"
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
-REQUEST_TIMEOUT_SECONDS = 120
+REQUEST_TIMEOUT_SECONDS = 60
+KEEP_ALIVE = "30m"
+DEFAULT_OLLAMA_OPTIONS = {
+    "temperature": 0.1,
+    "top_p": 0.8,
+    "num_ctx": 2048,
+    "num_predict": 400,
+}
 
 
 class PlannerAgent:
@@ -16,10 +23,15 @@ class PlannerAgent:
         model_name: str = MODEL_NAME,
         ollama_api_url: str = OLLAMA_API_URL,
         timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
+        keep_alive: str = KEEP_ALIVE,
+        ollama_options: dict[str, Any] | None = None,
     ) -> None:
         self.model_name = model_name
         self.ollama_api_url = ollama_api_url
         self.timeout_seconds = timeout_seconds
+        self.keep_alive = keep_alive
+        self.ollama_options = ollama_options or DEFAULT_OLLAMA_OPTIONS.copy()
+        self.session = requests.Session()
 
     async def create_plan(self, user_request: str) -> dict[str, Any]:
         cleaned_request = user_request.strip()
@@ -35,7 +47,7 @@ class PlannerAgent:
     def _build_prompt(self, user_request: str) -> str:
         return (
             "You are Planner Agent for a local autonomous AI system.\n"
-            "Create a strict development plan from the user request.\n"
+            "Create a strict concise development plan from the user request.\n"
             "Return only valid JSON.\n"
             "Do not include markdown, comments, or extra text.\n\n"
             "JSON schema:\n"
@@ -58,12 +70,14 @@ class PlannerAgent:
             "model": self.model_name,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": self.keep_alive,
+            "options": self.ollama_options,
         }
         return await asyncio.to_thread(self._post_to_ollama, payload)
 
     def _post_to_ollama(self, payload: dict[str, Any]) -> str:
         try:
-            response = requests.post(
+            response = self.session.post(
                 self.ollama_api_url,
                 json=payload,
                 timeout=self.timeout_seconds,

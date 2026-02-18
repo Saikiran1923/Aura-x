@@ -6,7 +6,13 @@ import requests
 
 MODEL_NAME = "qwen2.5:7b"
 OLLAMA_API_URL = "http://localhost:11434/api/generate"
-REQUEST_TIMEOUT_SECONDS = 180
+REQUEST_TIMEOUT_SECONDS = 90
+KEEP_ALIVE = "30m"
+DEFAULT_OLLAMA_OPTIONS = {
+    "temperature": 0.1,
+    "top_p": 0.85,
+    "num_ctx": 3072,
+}
 PROJECTS_ROOT = Path("projects")
 
 
@@ -16,16 +22,21 @@ class CoderAgent:
         model_name: str = MODEL_NAME,
         ollama_api_url: str = OLLAMA_API_URL,
         timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
+        keep_alive: str = KEEP_ALIVE,
+        ollama_options: dict[str, Any] | None = None,
     ) -> None:
         self.model_name = model_name
         self.ollama_api_url = ollama_api_url
         self.timeout_seconds = timeout_seconds
+        self.keep_alive = keep_alive
+        self.ollama_options = ollama_options or DEFAULT_OLLAMA_OPTIONS.copy()
+        self.session = requests.Session()
 
     async def generate_file_code(
         self,
         file_name: str,
         task_description: str,
-        project_request: str,
+        project_request: str | None = None,
     ) -> str:
         cleaned_file_name = file_name.strip()
         if not cleaned_file_name:
@@ -34,9 +45,12 @@ class CoderAgent:
         prompt = self._build_prompt(
             file_name=cleaned_file_name,
             task_description=task_description.strip(),
-            project_request=project_request.strip(),
+            project_request=(project_request or "").strip(),
         )
-        raw_response = await self._generate(prompt)
+        raw_response = await self._generate(
+            prompt=prompt,
+            file_name=cleaned_file_name,
+        )
         cleaned_content = self._clean_code_output(raw_response)
         if not cleaned_content:
             raise RuntimeError(f"Coder agent returned empty content for '{file_name}'.")
@@ -67,20 +81,34 @@ class CoderAgent:
             "Do not include explanations.\n\n"
             f"Target file: {file_name}\n"
             f"Task description: {task_description}\n"
-            f"Original user request: {project_request}\n"
+            f"Original user request: {project_request[:800]}\n"
         )
 
-    async def _generate(self, prompt: str) -> str:
+    async def _generate(self, prompt: str, file_name: str) -> str:
+        options = self._build_options(file_name)
         payload = {
             "model": self.model_name,
             "prompt": prompt,
             "stream": False,
+            "keep_alive": self.keep_alive,
+            "options": options,
         }
         return await asyncio.to_thread(self._post_to_ollama, payload)
 
+    def _build_options(self, file_name: str) -> dict[str, Any]:
+        options = self.ollama_options.copy()
+        lower_name = file_name.lower()
+        if lower_name.endswith(".py"):
+            options["num_predict"] = 900
+        elif lower_name.endswith((".md", ".txt", ".json", ".yaml", ".yml")):
+            options["num_predict"] = 650
+        else:
+            options["num_predict"] = 750
+        return options
+
     def _post_to_ollama(self, payload: dict[str, Any]) -> str:
         try:
-            response = requests.post(
+            response = self.session.post(
                 self.ollama_api_url,
                 json=payload,
                 timeout=self.timeout_seconds,
@@ -125,7 +153,7 @@ class CoderAgent:
 async def generate_file_code(
     file_name: str,
     description: str,
-    project_request: str,
+    project_request: str | None = None,
 ) -> str:
     coder = CoderAgent()
     return await coder.generate_file_code(file_name, description, project_request)

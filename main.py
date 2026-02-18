@@ -40,7 +40,7 @@ class AuraXSystem:
                     code = await self.coder.generate_file_code(
                         file_name=file_name,
                         task_description=description,
-                        project_request=user_request,
+                        project_request=None,
                     )
                 except Exception as exc:
                     print(f"Code generation failed for {file_name}: {exc}")
