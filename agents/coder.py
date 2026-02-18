@@ -1,40 +1,136 @@
-import subprocess
-import os
+import asyncio
+from pathlib import Path
+from typing import Any
+
+import requests
 
 MODEL_NAME = "qwen2.5:7b"
-def call_llm(prompt: str) -> str:
-    process = subprocess.Popen(
-        ["ollama", "run", MODEL_NAME],
-        stdin=subprocess.PIPE,
-        stdout=subprocess.PIPE,
-        stderr=subprocess.PIPE,
-        text=True,
-        encoding="utf-8",
-        errors="ignore"
-    )
-    output, error = process.communicate(prompt)
-    return output.strip()
+OLLAMA_API_URL = "http://localhost:11434/api/generate"
+REQUEST_TIMEOUT_SECONDS = 180
+PROJECTS_ROOT = Path("projects")
 
-def generate_file_code(file_name: str, description: str):
-    prompt = f"""
-You are a senior Python developer.
 
-Generate complete production-ready code for file: {file_name}
+class CoderAgent:
+    def __init__(
+        self,
+        model_name: str = MODEL_NAME,
+        ollama_api_url: str = OLLAMA_API_URL,
+        timeout_seconds: int = REQUEST_TIMEOUT_SECONDS,
+    ) -> None:
+        self.model_name = model_name
+        self.ollama_api_url = ollama_api_url
+        self.timeout_seconds = timeout_seconds
 
-Description:
-{description}
+    async def generate_file_code(
+        self,
+        file_name: str,
+        task_description: str,
+        project_request: str,
+    ) -> str:
+        cleaned_file_name = file_name.strip()
+        if not cleaned_file_name:
+            raise ValueError("file_name cannot be empty.")
 
-Return only the code.
-"""
-    return call_llm(prompt)
+        prompt = self._build_prompt(
+            file_name=cleaned_file_name,
+            task_description=task_description.strip(),
+            project_request=project_request.strip(),
+        )
+        raw_response = await self._generate(prompt)
+        cleaned_content = self._clean_code_output(raw_response)
+        if not cleaned_content:
+            raise RuntimeError(f"Coder agent returned empty content for '{file_name}'.")
+        return cleaned_content
 
-def write_file(project_name: str, file_name: str, content: str):
-    project_path = os.path.join("projects", project_name)
-    os.makedirs(project_path, exist_ok=True)
+    async def write_file(
+        self,
+        project_name: str,
+        file_name: str,
+        content: str,
+    ) -> Path:
+        project_path = PROJECTS_ROOT / project_name.strip()
+        target_path = self._resolve_project_path(project_path, file_name.strip())
+        await asyncio.to_thread(self._write_text_file, target_path, content)
+        return target_path
 
-    file_path = os.path.join(project_path, file_name)
+    def _build_prompt(
+        self,
+        file_name: str,
+        task_description: str,
+        project_request: str,
+    ) -> str:
+        return (
+            "You are Coder Agent in a local autonomous AI system.\n"
+            "Generate production-ready file content.\n"
+            "Return only raw file content.\n"
+            "Do not include markdown fences.\n"
+            "Do not include explanations.\n\n"
+            f"Target file: {file_name}\n"
+            f"Task description: {task_description}\n"
+            f"Original user request: {project_request}\n"
+        )
 
-    with open(file_path, "w", encoding="utf-8") as f:
-        f.write(content)
+    async def _generate(self, prompt: str) -> str:
+        payload = {
+            "model": self.model_name,
+            "prompt": prompt,
+            "stream": False,
+        }
+        return await asyncio.to_thread(self._post_to_ollama, payload)
 
-    print(f"Created: {file_path}")
+    def _post_to_ollama(self, payload: dict[str, Any]) -> str:
+        try:
+            response = requests.post(
+                self.ollama_api_url,
+                json=payload,
+                timeout=self.timeout_seconds,
+            )
+            response.raise_for_status()
+        except requests.RequestException as exc:
+            raise RuntimeError(f"Ollama API request failed: {exc}") from exc
+
+        try:
+            body = response.json()
+        except ValueError as exc:
+            raise RuntimeError("Ollama API returned non-JSON response.") from exc
+
+        generated = body.get("response", "")
+        if not isinstance(generated, str):
+            raise RuntimeError("Ollama API payload missing response text.")
+        return generated.strip()
+
+    def _clean_code_output(self, text: str) -> str:
+        cleaned = text.strip()
+        if cleaned.startswith("```"):
+            lines = cleaned.splitlines()
+            if lines:
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            cleaned = "\n".join(lines).strip()
+        return cleaned
+
+    def _resolve_project_path(self, project_path: Path, file_name: str) -> Path:
+        project_root = project_path.resolve()
+        target_path = (project_root / file_name).resolve()
+        if project_root not in target_path.parents and target_path != project_root:
+            raise ValueError(f"Invalid file path outside project root: {file_name}")
+        return target_path
+
+    def _write_text_file(self, file_path: Path, content: str) -> None:
+        file_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path.write_text(content, encoding="utf-8")
+
+
+async def generate_file_code(
+    file_name: str,
+    description: str,
+    project_request: str,
+) -> str:
+    coder = CoderAgent()
+    return await coder.generate_file_code(file_name, description, project_request)
+
+
+async def write_file(project_name: str, file_name: str, content: str) -> Path:
+    coder = CoderAgent()
+    return await coder.write_file(project_name, file_name, content)
