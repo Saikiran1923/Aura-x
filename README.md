@@ -23,7 +23,8 @@ aura-x/
 │   └── debugger.py
 ├── core/
 │   ├── executor.py
-│   └── launcher.py
+│   ├── launcher.py
+│   └── ollama_client.py
 ├── projects/
 ├── main.py
 ├── requirements.txt
@@ -48,6 +49,8 @@ aura-x/
 ## Run
 
 - `python main.py`
+- Non-interactive mode:
+  - `python main.py --request "Build a todo CLI in Python"`
 
 Then enter your project request when prompted.
 
@@ -58,15 +61,18 @@ If you see `Read timed out` from Ollama, increase the read timeout using environ
 - PowerShell:
   - `$env:AURAX_OLLAMA_TIMEOUT_SECONDS="300"`
   - `$env:AURAX_OLLAMA_MAX_RETRIES="3"`
+  - `$env:AURAX_OLLAMA_BASE_URL="http://localhost:11434"`
 - CMD:
   - `set AURAX_OLLAMA_TIMEOUT_SECONDS=300`
   - `set AURAX_OLLAMA_MAX_RETRIES=3`
+  - `set AURAX_OLLAMA_BASE_URL=http://localhost:11434`
 
 ## Runtime Behavior
 
 1. Accepts a user request.
-2. Generates a strict JSON development plan.
-3. Generates and writes files into `projects/<project_name>/`.
-4. Executes generated `.py` files.
-5. Detects execution errors.
-6. Attempts one automatic correction and re-runs once.
+2. Runs preflight checks (Ollama server availability and model availability).
+3. Generates a strict JSON development plan.
+4. Generates and writes files into `projects/<project_name>/`.
+5. Executes generated `.py` files.
+6. Detects execution errors.
+7. Attempts one automatic correction and re-runs once.

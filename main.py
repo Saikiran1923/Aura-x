@@ -1,4 +1,5 @@
 import asyncio
+import argparse
 import json
 import re
 from pathlib import Path
@@ -8,17 +9,22 @@ from agents.debugger import DebuggerAgent
 from agents.planner import PlannerAgent
 from core.executor import ExecutionEngine, ExecutionResult
 from core.launcher import ProjectLauncher
+from core.ollama_client import MODEL_NAME, OllamaClient
 
 
 class AuraXSystem:
     def __init__(self) -> None:
-        self.planner = PlannerAgent()
-        self.coder = CoderAgent()
-        self.debugger = DebuggerAgent()
+        self.ollama_client = OllamaClient()
+        self.planner = PlannerAgent(ollama_client=self.ollama_client)
+        self.coder = CoderAgent(ollama_client=self.ollama_client)
+        self.debugger = DebuggerAgent(ollama_client=self.ollama_client)
         self.executor = ExecutionEngine()
         self.launcher = ProjectLauncher()
 
     async def run(self, user_request: str) -> int:
+        if not await self._run_preflight_checks():
+            return 1
+
         try:
             plan = await self.planner.create_plan(user_request)
         except Exception as exc:
@@ -98,6 +104,20 @@ class AuraXSystem:
             print(f"Launch note: {launch_result.details}")
         return 0
 
+    async def _run_preflight_checks(self) -> bool:
+        print("Running preflight checks...")
+        server_ok, server_message = await asyncio.to_thread(self.ollama_client.check_server)
+        print(server_message)
+        if not server_ok:
+            return False
+
+        model_ok, model_message = await asyncio.to_thread(
+            self.ollama_client.check_model,
+            MODEL_NAME,
+        )
+        print(model_message)
+        return model_ok
+
     async def _execute_file(self, project_name: str, file_name: str) -> ExecutionResult:
         try:
             result = await self.executor.run_python_file(project_name, file_name)
@@ -173,7 +193,20 @@ class AuraXSystem:
 
 
 async def async_main() -> int:
-    user_input = (await asyncio.to_thread(input, "Enter project request: ")).strip()
+    parser = argparse.ArgumentParser(description="AURA-X local autonomous AI system")
+    parser.add_argument(
+        "--request",
+        dest="request_text",
+        type=str,
+        default="",
+        help="Optional project request text for non-interactive runs.",
+    )
+    args = parser.parse_args()
+
+    user_input = args.request_text.strip()
+    if not user_input:
+        user_input = (await asyncio.to_thread(input, "Enter project request: ")).strip()
+
     if not user_input:
         print("Request cannot be empty.")
         return 1
